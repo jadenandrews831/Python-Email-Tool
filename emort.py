@@ -5,6 +5,7 @@ import getpass
 import json
 import os
 import random
+import smtplib, ssl
 import string
 import subprocess
 import sys
@@ -26,16 +27,28 @@ def main():
   )
   parser.add_argument('-w', '--write', type=str, help="write email at the cli")
   parser.add_argument('-e', '--email', type=str, help="give recipient addresses at the cli")
-  parser.add_argument('-c', '--config', help='Give config file as argument or type values at the cli')
-  check_config()
-  
-def check_config():
-  if os.path.exists('config/config.json'):
-    decrypt_config()
-    decrypt_pass()
-    email_signin()
+  parser.add_argument('-c', '--config', action='store_true', help='Give config file as argument or type values at the cli')
+  args = parser.parse_args()
+
+  if args.config:
+    usr = input("Username: ")
+    pss = getpass.getpass("Password: ")
+    srv = input("Outgoing Server: ")
+    prt = input("SMTP Port: ")
+    write_config(usr, pss, srv, prt)
+
+  exists = check_config()
+  if exists:
+    config = decrypt_config()
+    email_signin(config)
   else:
     creds_prompt()
+  
+def check_config():
+  if os.path.exists('dist/config/config.json'):
+    return True
+  else:
+    return False
 
 def creds_prompt(usr=None, pswrd=None):
   if usr and pswrd:
@@ -51,30 +64,52 @@ def creds_prompt(usr=None, pswrd=None):
       sys.exit(1)
     else:
       print("Creds Received")
-      write_config(usr, pswrd, smtp, port)
-      email_signin()
+      config = write_config(usr, pswrd, smtp, port)
+      email_signin(config)
 
-def email_signin():
-  print("Email Signin")
+def make_group(name, members):
+  config = decrypt_config()
+  print("Config:\n", config)
+    
 
-def write_config(usr, pswrd, smtp, port=465):
+def email_signin(config):
+  usr = config["username"]
+  pswrd = config["password"]
+  SMTP = config["SMTP"]
+  port = config["port"]
+
+  print(f"Info >> \n\t{usr}\n\t{pswrd}\n\t{SMTP}\n\t{port}")
+
+  context = ssl.create_default_context()
+
+  with smtplib.SMTP_SSL(SMTP, port, context=context) as server:
+    server.login(usr, pswrd)
+    print("Logged in to mail server", SMTP)
+    return True
+  
+  return False
+    # server.sendmail(usr, None, )
+
+
+def write_config(usr, pswrd, smtp, port):
   try:
-    file_name = os.getcwd()+"/config/config.json"
-    f = open(file_name, "x")
+    file_name = os.getcwd()+"/dist/config/config.json"
+    if os.path.exists(file_name): f = open(file_name, "w")
+    else: f = open(file_name, "x")
+    if port == "":
+      port = 465
     data = json.dumps({"username": usr, "password": pswrd, "SMTP": smtp, "port": port})
     f.write(data)
     print("Wrote Config >>>\n\n", data)
     f.close()
     encrypt_config(file_name)
+    return json.loads(data)
   except Exception as e:
     print("Unable to write to config.json >>> \n\n", e)
     sys.exit(1)
 
-def encrypt_pass():
-  pass
-
 def make_key():
-  f = open('config/.kemort', 'x')
+  f = open('dist/config/.kemort', 'x')
   seed_len = random.randint(10,90)
   garb_len = random.randint(10,90)
   seed = ''.join(random.choices(string.ascii_letters + string.digits + '='+'-'+'_', k=seed_len))
@@ -89,7 +124,7 @@ def make_key():
 
 def get_key():
   try:
-    f = open('config/.kemort', 'r')
+    f = open('dist/config/.kemort', 'r')
     file = f.read()
     idx = int(file[:2])+1
     print("idx:", idx)
@@ -103,7 +138,7 @@ def get_key():
 
 
 def encrypt_config(file):
-  if (not os.path.exists('config/.kemort')):
+  if (not os.path.exists('dist/config/.kemort')):
     make_key()
   key = get_key()
   fernet = Fernet(key)
@@ -114,27 +149,19 @@ def encrypt_config(file):
     f.write(encrypted)
 
   print("Finished Encrypting")
-  # key = os.getenv('emort_key')
-  # if key == None:
-  #   key = Fernet.generate_key()
-  #   print("Key:", key)
-  #   os.environ['emort_key'] = key.decode()
-  #   print("Key: ",os.getenv('emort_key'))
-
-def decrypt_pass():
-  pass
 
 def decrypt_config():
   try:
     key = get_key()
     print("Key:", key)
-    with open('config/config.json', 'rb') as f:
+    with open('dist/config/config.json', 'rb') as f:
       encrypted = f.read()
     fernet = Fernet(key)
-    data = fernet.decrypt(encrypted)
+    data = fernet.decrypt(encrypted).decode()
     print("Data:", data)
     config = json.loads(data)
     print("File Data >>> \n\n", data)
+    return config
   except Exception as e:
     print("Unable to decrypt. Please Try Again later", e)
     sys.exit(1)
